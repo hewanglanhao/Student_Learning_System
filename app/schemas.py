@@ -45,6 +45,16 @@ class AnswerRequest(BaseModel):
     selected_option: str
 
 
+class BatchAnswerItem(BaseModel):
+    question_id: str
+    selected_option: str
+
+
+class BatchAnswerRequest(BaseModel):
+    user_id: str
+    answers: list[BatchAnswerItem]
+
+
 class QuestionResponse(BaseModel):
     question: Dict
     strategy: str
@@ -64,3 +74,15 @@ class AnswerResponse(BaseModel):
     updated_kc_mastery: Dict[str, float]
     profile_update_time: str
 
+
+class BatchAnswerResult(BaseModel):
+    question_id: str
+    is_correct: bool
+    correct_option: str
+    selected_option: str
+
+
+class BatchAnswerResponse(BaseModel):
+    results: list[BatchAnswerResult]
+    updated_kc_mastery: Dict[str, float]
+    profile_update_time: str

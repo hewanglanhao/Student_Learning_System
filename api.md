@@ -1,28 +1,60 @@
 # DKT Backend API
 
-Base URL: `http://localhost:8000`
+基础地址：`http://localhost:8000`
 
-This service reads data from MongoDB:
-- Database: `user_profiles_db`
-- Collections: `practice` (questions), `user_profiles` (profiles)
+服务读取 MongoDB 数据：
+- 数据库：`user_profiles_db`
+- 集合：`practice`（题库），`user_profiles`（用户画像）
 
-Question documents are normalized from either English fields (`question_id`, `question_text`, `options`, `answer`, `knowledge_points`) or Chinese fields (`题目ID`, `题目描述`, `选项`, `答案`, `知识点`).  
-All question responses are returned in Chinese field names to match your frontend data format.
+题目文档会从英文字段（`question_id`, `question_text`, `options`, `answer`, `knowledge_points`）或中文字段（`题目ID`, `题目描述`, `选项`, `答案`, `知识点`）中规范化读取。  
+所有题目响应均返回中文字段名，以匹配前端数据格式。
 
-## Health
+## 健康检查
 
 `GET /health`
 
-Response:
+响应：
 ```json
 {"status":"ok"}
 ```
 
-## Single Question (Weakest-KC First)
+## 获取用户画像
+
+`GET /users/{user_id}`
+
+说明：按 `user_id` 返回用户画像全文；`_id` 会被转换为字符串。
+
+响应（示例）：
+```json
+{
+  "_id": "65c8f0f4f2a1b1f3a9c9b1a2",
+  "user_id": "u_001",
+  "knowledge_mastery": {"数据文件处理": 0.42},
+  "interaction_history": []
+}
+```
+
+## 调试数据库连接信息
+
+`GET /debug/dbinfo`
+
+说明：返回后端当前使用的 MongoDB 连接与集合配置，便于核对 Compass 是否连到同一个实例。
+
+响应（示例）：
+```json
+{
+  "mongodb_uri": "mongodb://localhost:27017",
+  "db_name": "user_profiles_db",
+  "practice_collection": "practice",
+  "user_collection": "user_profiles"
+}
+```
+
+## 单题（补弱优先）
 
 `POST /questions/single/weakest`
 
-Request:
+请求：
 ```json
 {
   "user_id": "u_001",
@@ -35,7 +67,16 @@ Request:
 }
 ```
 
-Response:
+字段说明：
+1. `user_id`：用户唯一标识。
+2. `zpd_min`：最近发展区下限（预计正确率下限，0~1）。
+3. `zpd_max`：最近发展区上限（预计正确率上限，0~1）。
+4. `expected_mode`：预计正确率的聚合方式，`min`/`mean`/`product`。
+5. `score_mode`：补弱打分方式，`sum`/`max`/`min`。
+6. `top_k_weak`：参与候选的最弱知识点数量。
+7. `max_candidates`：从题库中最多拉取的候选题数量。
+
+响应：
 ```json
 {
   "strategy": "weakest",
@@ -50,11 +91,21 @@ Response:
 }
 ```
 
-## Single Question (Spaced Repetition)
+字段说明：
+1. `strategy`：出题策略标识，`weakest` 表示补弱优先。
+2. `zpd_applied`：是否成功应用 ZPD 筛选。
+3. `question`：题目对象（中文字段格式）。
+4. `question.题目ID`：题目编号。
+5. `question.题目类型`：题型，通常为 `选择题`。
+6. `question.题目描述`：题干。
+7. `question.选项`：四个选项键值（A/B/C/D）。
+8. `question.知识点`：题目关联知识点列表。
+
+## 单题（间隔重复）
 
 `POST /questions/single/spaced`
 
-Request:
+请求：
 ```json
 {
   "user_id": "u_001",
@@ -71,13 +122,26 @@ Request:
 }
 ```
 
-Response: same shape as the weakest endpoint, with `strategy: "spaced"`.
+字段说明：
+1. `user_id`：用户唯一标识。
+2. `zpd_min`：最近发展区下限（预计正确率下限，0~1）。
+3. `zpd_max`：最近发展区上限（预计正确率上限，0~1）。
+4. `expected_mode`：预计正确率的聚合方式，`min`/`mean`/`product`。
+5. `interval_days`：间隔复习周期（天）。
+6. `alpha`：补弱权重（0~1）。
+7. `beta`：遗忘风险权重（0~1）。
+8. `mastery_threshold`：认为“已掌握”的阈值（0~1）。
+9. `top_k_review`：参与复习候选的知识点数量。
+10. `top_k_weak`：参与补弱候选的知识点数量。
+11. `max_candidates`：从题库中最多拉取的候选题数量。
 
-## Question Set (Diversity + Coverage)
+响应：与补弱优先接口相同结构，仅 `strategy` 为 `"spaced"`。
+
+## 出一套题（多样性 + 覆盖）
 
 `POST /questions/set`
 
-Request:
+请求：
 ```json
 {
   "user_id": "u_001",
@@ -90,7 +154,16 @@ Request:
 }
 ```
 
-Response:
+字段说明：
+1. `user_id`：用户唯一标识。
+2. `count`：需要出题的数量。
+3. `zpd_min`：最近发展区下限（预计正确率下限，0~1）。
+4. `zpd_max`：最近发展区上限（预计正确率上限，0~1）。
+5. `expected_mode`：预计正确率的聚合方式，`min`/`mean`/`product`。
+6. `max_candidates`：从题库中最多拉取的候选题数量。
+7. `difficulty_ratio`：难度比例配置，`easy`/`medium`/`hard` 之和建议为 1。
+
+响应：
 ```json
 {
   "strategy": "set",
@@ -101,11 +174,16 @@ Response:
 }
 ```
 
-## Submit Answer (Update LSTM Mastery)
+字段说明：
+1. `strategy`：出题策略标识，`set` 表示出一套题。
+2. `zpd_applied`：是否成功应用 ZPD 筛选。
+3. `questions`：题目数组（中文字段格式）。
+
+## 单题提交答案（更新 LSTM 掌握度）
 
 `POST /questions/answer`
 
-Request:
+请求：
 ```json
 {
   "user_id": "u_001",
@@ -114,7 +192,12 @@ Request:
 }
 ```
 
-Response:
+字段说明：
+1. `user_id`：用户唯一标识。
+2. `question_id`：题目编号（与题库一致）。
+3. `selected_option`：用户选择的选项（A/B/C/D）。
+
+响应：
 ```json
 {
   "is_correct": false,
@@ -125,23 +208,72 @@ Response:
 }
 ```
 
-## Notes
+字段说明：
+1. `is_correct`：是否答对。
+2. `correct_option`：正确选项（A/B/C/D）。
+3. `selected_option`：用户选择的选项（A/B/C/D）。
+4. `updated_kc_mastery`：本题关联知识点的最新掌握度（0~1）。
+5. `profile_update_time`：用户画像更新时间（ISO 时间）。
 
-- All questions returned include 4 options only. Non-multiple-choice items are skipped.
-- Question responses do not include `答案` to avoid leaking the correct option.
-- The service stores an `interaction_history` array and updates `knowledge_mastery`, `kc_last_practiced`, and `kc_review_count` in `user_profiles`.
-- Knowledge point indices are loaded from `最终结果.py` (list `knowledge_points`), and LSTM inference uses `DKT_backend/dkt_model.pt`.
+## 套题提交答案（统一更新 LSTM 掌握度）
 
-## Run
+`POST /questions/set/answer`
+
+请求：
+```json
+{
+  "user_id": "u_001",
+  "answers": [
+    {"question_id": "C00001", "selected_option": "B"},
+    {"question_id": "C00002", "selected_option": "D"}
+  ]
+}
+```
+
+字段说明：
+1. `user_id`：用户唯一标识。
+2. `answers`：答题数组。
+3. `answers[].question_id`：题目编号（与题库一致）。
+4. `answers[].selected_option`：用户选择的选项（A/B/C/D）。
+
+响应：
+```json
+{
+  "results": [
+    {"question_id": "C00001", "is_correct": false, "correct_option": "C", "selected_option": "B"},
+    {"question_id": "C00002", "is_correct": true, "correct_option": "D", "selected_option": "D"}
+  ],
+  "updated_kc_mastery": {"数据文件处理": 0.52},
+  "profile_update_time": "2026-02-11T13:22:10.123456+00:00"
+}
+```
+
+字段说明：
+1. `results`：本套题每题的判题结果数组。
+2. `results[].question_id`：题目编号。
+3. `results[].is_correct`：是否答对。
+4. `results[].correct_option`：正确选项（A/B/C/D）。
+5. `results[].selected_option`：用户选择的选项（A/B/C/D）。
+6. `updated_kc_mastery`：整套题完成后整体更新的知识点掌握度（0~1）。
+7. `profile_update_time`：用户画像更新时间（ISO 时间）。
+
+## 说明
+
+- 所有题目仅返回 4 个选项，非选择题会被跳过。
+- 题目响应不包含 `答案`，避免泄露正确选项。
+- 服务会在 `user_profiles` 中保存 `interaction_history`，并更新 `knowledge_mastery`、`kc_last_practiced`、`kc_review_count`。
+- 知识点索引来自 `最终结果.py` 的 `knowledge_points` 列表，LSTM 推理使用 `DKT_backend/dkt_model.pt`。
+
+## 运行
 
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Environment Variables
+## 环境变量
 
-All settings can be overridden using `DKT_` prefix:
+所有配置可通过 `DKT_` 前缀环境变量覆盖：
 
 - `DKT_MONGODB_URI`
 - `DKT_DB_NAME`
@@ -149,3 +281,59 @@ All settings can be overridden using `DKT_` prefix:
 - `DKT_USER_COLLECTION`
 - `DKT_MODEL_PATH`
 - `DKT_KNOWLEDGE_POINTS_PATH`
+
+## 使用步骤
+**使用步骤**
+1. 启动 MongoDB 服务，确保有数据库 `user_profiles_db`，题库集合 `practice`，画像集合 `user_profiles`。  
+2. 进入后端目录并安装依赖：
+```bash
+cd DKT_backend
+pip install -r requirements.txt
+```
+3. 启动服务：
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+4. 按流程调用接口：先取题 → 用户答题 → 提交答案（会更新画像与掌握度）。
+
+**接口调用示例**
+1. 健康检查：
+```bash
+curl http://localhost:8000/health
+```
+
+2. 单题（补弱优先）：
+```bash
+curl -X POST http://localhost:8000/questions/single/weakest \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"u_001","zpd_min":0.6,"zpd_max":0.8,"expected_mode":"min","score_mode":"sum"}'
+```
+
+3. 单题（间隔重复）：
+```bash
+curl -X POST http://localhost:8000/questions/single/spaced \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"u_001","interval_days":7,"alpha":0.6,"beta":0.4,"mastery_threshold":0.6}'
+```
+
+4. 出一套题：
+```bash
+curl -X POST http://localhost:8000/questions/set \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"u_001","count":10,"expected_mode":"mean","difficulty_ratio":{"easy":0.2,"medium":0.6,"hard":0.2}}'
+```
+
+5. 提交答案（会更新 LSTM 掌握度并写回用户画像）：
+```bash
+curl -X POST http://localhost:8000/questions/answer \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"u_001","question_id":"C00001","selected_option":"B"}'
+```
+
+**可选配置（环境变量）**
+- `DKT_MONGODB_URI`（默认 `mongodb://localhost:27017`）
+- `DKT_DB_NAME`（默认 `user_profiles_db`）
+- `DKT_PRACTICE_COLLECTION`（默认 `practice`）
+- `DKT_USER_COLLECTION`（默认 `user_profiles`）
+
+需要我根据你现有的题库字段结构，把接口返回字段做成前端直接可用的格式吗？

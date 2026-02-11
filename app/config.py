@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -14,8 +14,7 @@ class Settings(BaseSettings):
     model_path: str | None = None
     knowledge_points_path: str | None = None
 
-    class Config:
-        env_prefix = "DKT_"
+    model_config = SettingsConfigDict(env_prefix="DKT_", protected_namespaces=("settings_",))
 
     def resolved_model_path(self) -> Path:
         if self.model_path:

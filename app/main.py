@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
+from bson import ObjectId
 
 from .config import settings
 from .db import get_client, get_db
@@ -20,6 +21,9 @@ from .recommender import (
 from .schemas import (
     AnswerRequest,
     AnswerResponse,
+    BatchAnswerRequest,
+    BatchAnswerResponse,
+    BatchAnswerResult,
     QuestionResponse,
     QuestionSetRequest,
     QuestionSetResponse,
@@ -150,6 +154,26 @@ def _filter_answered(questions: list[Question], answered_ids: set[str]) -> list[
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/users/{user_id}")
+async def get_user_profile(user_id: str, db=Depends(get_db)):
+    profile = await db[settings.user_collection].find_one({"user_id": user_id})
+    if not profile:
+        raise HTTPException(status_code=404, detail="User not found")
+    if "_id" in profile and isinstance(profile["_id"], ObjectId):
+        profile["_id"] = str(profile["_id"])
+    return profile
+
+
+@app.get("/debug/dbinfo")
+async def debug_dbinfo():
+    return {
+        "mongodb_uri": settings.mongodb_uri,
+        "db_name": settings.db_name,
+        "practice_collection": settings.practice_collection,
+        "user_collection": settings.user_collection,
+    }
 
 
 @app.post("/questions/single/weakest", response_model=QuestionResponse)
@@ -354,3 +378,106 @@ async def submit_answer(
         profile_update_time=now,
     )
 
+
+@app.post("/questions/set/answer", response_model=BatchAnswerResponse)
+async def submit_answer_set(
+    payload: BatchAnswerRequest,
+    db=Depends(get_db),
+):
+    if not payload.answers:
+        raise HTTPException(status_code=400, detail="answers is empty")
+
+    dkt: DKTInference = app.state.dkt
+    profile = await _get_or_create_profile(db, payload.user_id, dkt.knowledge_points)
+
+    question_ids = [item.question_id for item in payload.answers]
+    question_docs = await db[settings.practice_collection].find(
+        {"$or": [{"question_id": {"$in": question_ids}}, {"题目ID": {"$in": question_ids}}]}
+    ).to_list(length=len(question_ids))
+
+    question_map: dict[str, Question] = {}
+    for doc in question_docs:
+        q = normalize_question(doc)
+        if not q:
+            continue
+        if q.question_type and q.question_type != "选择题":
+            continue
+        question_map[q.question_id] = q
+
+    missing = [qid for qid in question_ids if qid not in question_map]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Questions not found or invalid: {missing}")
+
+    history = profile.get("interaction_history") or []
+    interactions: list[tuple[list[int], bool]] = []
+    for item in history:
+        kp_names = item.get("knowledge_points") or []
+        indices = [dkt.kc_to_idx[k] for k in kp_names if k in dkt.kc_to_idx]
+        if indices:
+            interactions.append((indices, bool(item.get("is_correct"))))
+
+    results: list[BatchAnswerResult] = []
+    history_items = []
+    kc_last_practiced = profile.get("kc_last_practiced") or {}
+    kc_review_count = profile.get("kc_review_count") or {}
+    now = _now_iso()
+
+    for item in payload.answers:
+        question = question_map[item.question_id]
+        selected = item.selected_option.strip().upper()
+        if selected not in {"A", "B", "C", "D"}:
+            raise HTTPException(status_code=400, detail=f"selected_option must be A/B/C/D for {item.question_id}")
+        correct = question.answer.strip().upper()
+        is_correct = selected == correct
+
+        current_indices = [dkt.kc_to_idx[k] for k in question.knowledge_points if k in dkt.kc_to_idx]
+        if current_indices:
+            interactions.append((current_indices, is_correct))
+
+        for kc in question.knowledge_points:
+            kc_last_practiced[kc] = now
+            kc_review_count[kc] = int(kc_review_count.get(kc, 0)) + 1
+
+        history_items.append(
+            {
+                "question_id": question.question_id,
+                "knowledge_points": question.knowledge_points,
+                "is_correct": is_correct,
+                "selected_option": selected,
+                "correct_option": correct,
+                "answered_at": now,
+            }
+        )
+
+        results.append(
+            BatchAnswerResult(
+                question_id=question.question_id,
+                is_correct=is_correct,
+                correct_option=correct,
+                selected_option=selected,
+            )
+        )
+
+    mastery_probs = dkt.predict_mastery(interactions)
+    mastery_map = profile.get("knowledge_mastery") or _default_mastery(dkt.knowledge_points)
+    for name, idx in dkt.kc_to_idx.items():
+        mastery_map[name] = float(mastery_probs[idx])
+
+    await db[settings.user_collection].update_one(
+        {"user_id": payload.user_id},
+        {
+            "$set": {
+                "knowledge_mastery": mastery_map,
+                "profile_update_time": now,
+                "kc_last_practiced": kc_last_practiced,
+                "kc_review_count": kc_review_count,
+            },
+            "$push": {"interaction_history": {"$each": history_items}},
+        },
+    )
+
+    return BatchAnswerResponse(
+        results=results,
+        updated_kc_mastery=mastery_map,
+        profile_update_time=now,
+    )
