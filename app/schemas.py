@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SingleQuestionRequest(BaseModel):
@@ -40,14 +40,20 @@ class QuestionSetRequest(BaseModel):
 
 
 class AnswerRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     user_id: str
     question_id: str
     selected_option: str
+    answer_explanation: Optional[str] = Field(default=None, alias="答案解析")
 
 
 class BatchAnswerItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     question_id: str
     selected_option: str
+    answer_explanation: Optional[str] = Field(default=None, alias="答案解析")
 
 
 class BatchAnswerRequest(BaseModel):

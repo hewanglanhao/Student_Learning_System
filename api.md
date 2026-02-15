@@ -6,7 +6,7 @@
 - 数据库：`user_profiles_db`
 - 集合：`practice`（题库），`user_profiles`（用户画像）
 
-题目文档会从英文字段（`question_id`, `question_text`, `options`, `answer`, `knowledge_points`）或中文字段（`题目ID`, `题目描述`, `选项`, `答案`, `知识点`）中规范化读取。  
+题目文档会从英文字段（`question_id`, `question_text`, `options`, `answer`, `answer_explanation`, `knowledge_points`）或中文字段（`题目ID`, `题目描述`, `选项`, `答案`, `答案解析`, `知识点`）中规范化读取。  
 所有题目响应均返回中文字段名，以匹配前端数据格式。
 
 ## 健康检查
@@ -30,7 +30,41 @@
   "_id": "65c8f0f4f2a1b1f3a9c9b1a2",
   "user_id": "u_001",
   "knowledge_mastery": {"数据文件处理": 0.42},
-  "interaction_history": []
+  "interaction_history": [
+    {
+      "question_id": "C00001",
+      "knowledge_points": ["数据文件处理"],
+      "is_correct": false,
+      "selected_option": "B",
+      "correct_option": "C",
+      "答案解析": "文件可以是二进制文件或文本文件，描述为数据序列。",
+      "answered_at": "2026-02-11T13:22:10.123456+00:00"
+    }
+  ]
+}
+```
+
+## 获取用户作答历史
+
+`GET /users/{user_id}/interaction_history`
+
+说明：按 `user_id` 返回该用户的 `interaction_history`。
+
+响应（示例）：
+```json
+{
+  "user_id": "u_001",
+  "interaction_history": [
+    {
+      "question_id": "C00001",
+      "knowledge_points": ["数据文件处理"],
+      "is_correct": false,
+      "selected_option": "B",
+      "correct_option": "C",
+      "答案解析": "文件可以是二进制文件或文本文件，描述为数据序列。",
+      "answered_at": "2026-02-11T13:22:10.123456+00:00"
+    }
+  ]
 }
 ```
 
@@ -188,7 +222,8 @@
 {
   "user_id": "u_001",
   "question_id": "C00001",
-  "selected_option": "B"
+  "selected_option": "B",
+  "答案解析": "用户提交的答案解析（可选）"
 }
 ```
 
@@ -196,6 +231,7 @@
 1. `user_id`：用户唯一标识。
 2. `question_id`：题目编号（与题库一致）。
 3. `selected_option`：用户选择的选项（A/B/C/D）。
+4. `答案解析`：可选。前端传入的解析文本；若不传则使用题库中的 `答案解析`。
 
 响应：
 ```json
@@ -224,7 +260,7 @@
 {
   "user_id": "u_001",
   "answers": [
-    {"question_id": "C00001", "selected_option": "B"},
+    {"question_id": "C00001", "selected_option": "B", "答案解析": "该题解析文本（可选）"},
     {"question_id": "C00002", "selected_option": "D"}
   ]
 }
@@ -235,6 +271,7 @@
 2. `answers`：答题数组。
 3. `answers[].question_id`：题目编号（与题库一致）。
 4. `answers[].selected_option`：用户选择的选项（A/B/C/D）。
+5. `answers[].答案解析`：可选。该题前端传入的解析文本；若不传则使用题库中的 `答案解析`。
 
 响应：
 ```json
@@ -261,7 +298,8 @@
 
 - 所有题目仅返回 4 个选项，非选择题会被跳过。
 - 题目响应不包含 `答案`，避免泄露正确选项。
-- 服务会在 `user_profiles` 中保存 `interaction_history`，并更新 `knowledge_mastery`、`kc_last_practiced`、`kc_review_count`。
+- 服务会在 `user_profiles` 中保存 `interaction_history`（每题含 `答案解析`），并更新 `knowledge_mastery`、`kc_last_practiced`、`kc_review_count`。
+- 提交答案时，`interaction_history.答案解析` 的来源优先级：前端请求字段 `答案解析` > 题库字段 `答案解析`。
 - 知识点索引来自 `最终结果.py` 的 `knowledge_points` 列表，LSTM 推理使用 `DKT_backend/dkt_model.pt`。
 
 ## 运行
@@ -296,44 +334,9 @@ uvicorn app.main:app --reload --port 8000
 ```
 4. 按流程调用接口：先取题 → 用户答题 → 提交答案（会更新画像与掌握度）。
 
-**接口调用示例**
-1. 健康检查：
-```bash
-curl http://localhost:8000/health
-```
-
-2. 单题（补弱优先）：
-```bash
-curl -X POST http://localhost:8000/questions/single/weakest \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u_001","zpd_min":0.6,"zpd_max":0.8,"expected_mode":"min","score_mode":"sum"}'
-```
-
-3. 单题（间隔重复）：
-```bash
-curl -X POST http://localhost:8000/questions/single/spaced \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u_001","interval_days":7,"alpha":0.6,"beta":0.4,"mastery_threshold":0.6}'
-```
-
-4. 出一套题：
-```bash
-curl -X POST http://localhost:8000/questions/set \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u_001","count":10,"expected_mode":"mean","difficulty_ratio":{"easy":0.2,"medium":0.6,"hard":0.2}}'
-```
-
-5. 提交答案（会更新 LSTM 掌握度并写回用户画像）：
-```bash
-curl -X POST http://localhost:8000/questions/answer \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"u_001","question_id":"C00001","selected_option":"B"}'
-```
 
 **可选配置（环境变量）**
 - `DKT_MONGODB_URI`（默认 `mongodb://localhost:27017`）
 - `DKT_DB_NAME`（默认 `user_profiles_db`）
 - `DKT_PRACTICE_COLLECTION`（默认 `practice`）
 - `DKT_USER_COLLECTION`（默认 `user_profiles`）
-
-需要我根据你现有的题库字段结构，把接口返回字段做成前端直接可用的格式吗？

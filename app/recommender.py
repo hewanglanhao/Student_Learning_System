@@ -15,6 +15,7 @@ class Question:
     question_text: str
     options: dict[str, str]
     answer: str
+    answer_explanation: str
     knowledge_points: list[str]
     question_type: str | None = None
 
@@ -48,6 +49,7 @@ def normalize_question(doc: dict) -> Question | None:
     question_id = doc.get("question_id") or doc.get("题目ID")
     question_text = doc.get("question_text") or doc.get("题目描述")
     answer = doc.get("answer") or doc.get("答案")
+    answer_explanation = doc.get("answer_explanation") or doc.get("答案解析") or ""
     options = doc.get("options") or doc.get("选项")
     knowledge_points = doc.get("knowledge_points") or doc.get("知识点")
     question_type = doc.get("question_type") or doc.get("题目类型")
@@ -67,6 +69,7 @@ def normalize_question(doc: dict) -> Question | None:
         question_text=str(question_text),
         options=options_norm,
         answer=str(answer).strip(),
+        answer_explanation=str(answer_explanation),
         knowledge_points=[str(k) for k in knowledge_points],
         question_type=str(question_type) if question_type else None,
     )

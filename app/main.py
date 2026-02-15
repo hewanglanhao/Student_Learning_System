@@ -166,6 +166,17 @@ async def get_user_profile(user_id: str, db=Depends(get_db)):
     return profile
 
 
+@app.get("/users/{user_id}/interaction_history")
+async def get_user_interaction_history(user_id: str, db=Depends(get_db)):
+    profile = await db[settings.user_collection].find_one({"user_id": user_id})
+    if not profile:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "user_id": user_id,
+        "interaction_history": profile.get("interaction_history", []),
+    }
+
+
 @app.get("/debug/dbinfo")
 async def debug_dbinfo():
     return {
@@ -340,12 +351,14 @@ async def submit_answer(
             mastery_map[name] = float(mastery_probs[idx])
 
     now = _now_iso()
+    answer_explanation = payload.answer_explanation or question.answer_explanation
     history_item = {
         "question_id": question.question_id,
         "knowledge_points": question.knowledge_points,
         "is_correct": is_correct,
         "selected_option": selected,
         "correct_option": correct,
+        "答案解析": answer_explanation,
         "answered_at": now,
     }
 
@@ -428,6 +441,7 @@ async def submit_answer_set(
         if selected not in {"A", "B", "C", "D"}:
             raise HTTPException(status_code=400, detail=f"selected_option must be A/B/C/D for {item.question_id}")
         correct = question.answer.strip().upper()
+        answer_explanation = item.answer_explanation or question.answer_explanation
         is_correct = selected == correct
 
         current_indices = [dkt.kc_to_idx[k] for k in question.knowledge_points if k in dkt.kc_to_idx]
@@ -445,6 +459,7 @@ async def submit_answer_set(
                 "is_correct": is_correct,
                 "selected_option": selected,
                 "correct_option": correct,
+                "答案解析": answer_explanation,
                 "answered_at": now,
             }
         )
