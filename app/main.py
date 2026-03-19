@@ -29,10 +29,13 @@ from .schemas import (
     QuestionSetResponse,
     SingleQuestionRequest,
     SpacedQuestionRequest,
+    UpdateIntervalDaysRequest,
+    UpdateIntervalDaysResponse,
 )
 
 
 app = FastAPI(title="DKT Backend", version="0.1.0")
+DEFAULT_INTERVAL_DAYS = 7
 
 
 @app.on_event("startup")
@@ -60,13 +63,21 @@ def _default_mastery(knowledge_points: list[str]) -> dict[str, float]:
 async def _get_or_create_profile(db, user_id: str, knowledge_points: list[str]) -> dict:
     profile = await db[settings.user_collection].find_one({"user_id": user_id})
     if profile:
+        update_fields = {}
         if "knowledge_mastery" not in profile:
-            profile["knowledge_mastery"] = _default_mastery(knowledge_points)
+            update_fields["knowledge_mastery"] = _default_mastery(knowledge_points)
+        interval_days = profile.get("interval_days")
+        if not isinstance(interval_days, int) or isinstance(interval_days, bool) or interval_days < 1:
+            update_fields["interval_days"] = DEFAULT_INTERVAL_DAYS
+        if update_fields:
+            await db[settings.user_collection].update_one({"user_id": user_id}, {"$set": update_fields})
+            profile.update(update_fields)
         return profile
 
     profile = {
         "user_id": user_id,
         "knowledge_mastery": _default_mastery(knowledge_points),
+        "interval_days": DEFAULT_INTERVAL_DAYS,
         "interaction_history": [],
         "kc_last_practiced": {},
         "kc_review_count": {},
@@ -88,6 +99,13 @@ def _get_answered_ids(profile: dict) -> set[str]:
 
 def _weak_kcs(mastery: dict[str, float], top_k: int) -> list[str]:
     return [k for k, _ in sorted(mastery.items(), key=lambda kv: kv[1])[:top_k]]
+
+
+def _profile_interval_days(profile: dict) -> int:
+    interval_days = profile.get("interval_days")
+    if isinstance(interval_days, int) and not isinstance(interval_days, bool) and interval_days >= 1:
+        return interval_days
+    return DEFAULT_INTERVAL_DAYS
 
 
 def _days_since(timestamp: str | None) -> float:
@@ -161,6 +179,13 @@ async def get_user_profile(user_id: str, db=Depends(get_db)):
     profile = await db[settings.user_collection].find_one({"user_id": user_id})
     if not profile:
         raise HTTPException(status_code=404, detail="User not found")
+    interval_days = profile.get("interval_days")
+    if not isinstance(interval_days, int) or isinstance(interval_days, bool) or interval_days < 1:
+        await db[settings.user_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {"interval_days": DEFAULT_INTERVAL_DAYS}},
+        )
+        profile["interval_days"] = DEFAULT_INTERVAL_DAYS
     if "_id" in profile and isinstance(profile["_id"], ObjectId):
         profile["_id"] = str(profile["_id"])
     return profile
@@ -175,6 +200,26 @@ async def get_user_interaction_history(user_id: str, db=Depends(get_db)):
         "user_id": user_id,
         "interaction_history": profile.get("interaction_history", []),
     }
+
+
+@app.put("/users/{user_id}/interval_days", response_model=UpdateIntervalDaysResponse)
+async def update_user_interval_days(
+    user_id: str,
+    payload: UpdateIntervalDaysRequest,
+    db=Depends(get_db),
+):
+    dkt: DKTInference = app.state.dkt
+    await _get_or_create_profile(db, user_id, dkt.knowledge_points)
+    now = _now_iso()
+    await db[settings.user_collection].update_one(
+        {"user_id": user_id},
+        {"$set": {"interval_days": payload.interval_days, "profile_update_time": now}},
+    )
+    return UpdateIntervalDaysResponse(
+        user_id=user_id,
+        interval_days=payload.interval_days,
+        profile_update_time=now,
+    )
 
 
 @app.get("/debug/dbinfo")
@@ -231,6 +276,7 @@ async def single_spaced(
     dkt: DKTInference = app.state.dkt
     profile = await _get_or_create_profile(db, payload.user_id, dkt.knowledge_points)
     mastery = profile.get("knowledge_mastery", {})
+    interval_days = _profile_interval_days(profile)
     answered_ids = _get_answered_ids(profile)
     kc_last_practiced = profile.get("kc_last_practiced", {}) or {}
 
@@ -254,7 +300,7 @@ async def single_spaced(
         mastery,
         kc_last_practiced,
         payload.mastery_threshold,
-        payload.interval_days,
+        interval_days,
         payload.alpha,
         payload.beta,
         payload.expected_mode,

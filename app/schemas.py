@@ -20,13 +20,22 @@ class SpacedQuestionRequest(BaseModel):
     zpd_min: float = Field(default=0.6, ge=0.0, le=1.0)
     zpd_max: float = Field(default=0.8, ge=0.0, le=1.0)
     expected_mode: Literal["min", "mean", "product"] = "min"
-    interval_days: int = Field(default=7, ge=1, le=365)
     alpha: float = Field(default=0.6, ge=0.0, le=1.0)
     beta: float = Field(default=0.4, ge=0.0, le=1.0)
     mastery_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     top_k_review: int = Field(default=5, ge=1, le=50)
     top_k_weak: int = Field(default=5, ge=1, le=50)
     max_candidates: int = Field(default=2000, ge=10, le=10000)
+
+
+class UpdateIntervalDaysRequest(BaseModel):
+    interval_days: int = Field(default=7, ge=1, le=365)
+
+
+class UpdateIntervalDaysResponse(BaseModel):
+    user_id: str
+    interval_days: int
+    profile_update_time: str
 
 
 class QuestionSetRequest(BaseModel):
