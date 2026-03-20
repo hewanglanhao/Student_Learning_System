@@ -29,6 +29,7 @@
 {
   "_id": "65c8f0f4f2a1b1f3a9c9b1a2",
   "user_id": "u_001",
+  "interval_days": 7,
   "knowledge_mastery": {"数据文件处理": 0.42},
   "interaction_history": [
     {
@@ -41,6 +42,31 @@
       "answered_at": "2026-02-11T13:22:10.123456+00:00"
     }
   ]
+}
+```
+
+## 设置用户间隔复习天数
+
+`PUT /users/{user_id}/interval_days`
+
+说明：设置该用户画像中的 `interval_days`。若用户不存在会自动创建画像。默认值为 `7`。
+
+请求：
+```json
+{
+  "interval_days": 10
+}
+```
+
+字段说明：
+1. `interval_days`：间隔复习周期（天），范围 1~365。
+
+响应：
+```json
+{
+  "user_id": "u_001",
+  "interval_days": 10,
+  "profile_update_time": "2026-03-10T08:00:00+00:00"
 }
 ```
 
@@ -146,7 +172,6 @@
   "zpd_min": 0.6,
   "zpd_max": 0.8,
   "expected_mode": "min",
-  "interval_days": 7,
   "alpha": 0.6,
   "beta": 0.4,
   "mastery_threshold": 0.6,
@@ -161,13 +186,14 @@
 2. `zpd_min`：最近发展区下限（预计正确率下限，0~1）。
 3. `zpd_max`：最近发展区上限（预计正确率上限，0~1）。
 4. `expected_mode`：预计正确率的聚合方式，`min`/`mean`/`product`。
-5. `interval_days`：间隔复习周期（天）。
-6. `alpha`：补弱权重（0~1）。
-7. `beta`：遗忘风险权重（0~1）。
-8. `mastery_threshold`：认为“已掌握”的阈值（0~1）。
-9. `top_k_review`：参与复习候选的知识点数量。
-10. `top_k_weak`：参与补弱候选的知识点数量。
-11. `max_candidates`：从题库中最多拉取的候选题数量。
+5. `alpha`：补弱权重（0~1）。
+6. `beta`：遗忘风险权重（0~1）。
+7. `mastery_threshold`：认为“已掌握”的阈值（0~1）。
+8. `top_k_review`：参与复习候选的知识点数量。
+9. `top_k_weak`：参与补弱候选的知识点数量。
+10. `max_candidates`：从题库中最多拉取的候选题数量。
+
+补充：该接口计算遗忘风险时使用用户画像中的 `interval_days`（默认 7），不再从请求参数读取。
 
 响应：与补弱优先接口相同结构，仅 `strategy` 为 `"spaced"`。
 
@@ -298,7 +324,7 @@
 
 - 所有题目仅返回 4 个选项，非选择题会被跳过。
 - 题目响应不包含 `答案`，避免泄露正确选项。
-- 服务会在 `user_profiles` 中保存 `interaction_history`（每题含 `答案解析`），并更新 `knowledge_mastery`、`kc_last_practiced`、`kc_review_count`。
+- 服务会在 `user_profiles` 中保存 `interaction_history`（每题含 `答案解析`），并更新 `knowledge_mastery`、`kc_last_practiced`、`kc_review_count`、`interval_days`（默认 7，可通过接口修改）。
 - 提交答案时，`interaction_history.答案解析` 的来源优先级：前端请求字段 `答案解析` > 题库字段 `答案解析`。
 - 知识点索引来自 `最终结果.py` 的 `knowledge_points` 列表，LSTM 推理使用 `DKT_backend/dkt_model.pt`。
 
